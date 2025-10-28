@@ -1,0 +1,60 @@
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.cache/
+.vite/
+vite-dist/
+*.tsbuildinfo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# TypeScript
+*.tsbuildinfo
+
+# Coverage reports
+coverage/
+*.lcov
+
+# Local server files
+.tmp/
+temp/
+*.local
+
+# Optional: if using testing frameworks
+jest-cache/
+jest-report/
+test-results/
+
+# Optional: if using ESLint or Prettier cache
+.eslintcache
+.prettier-cache
+
+# Optional: if using Next.js for SSR
+.next/
+out/
+
+# Optional: if using Docker
+docker-data/
+docker-compose.override.yml
+.dockerignore
