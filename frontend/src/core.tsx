@@ -1,33 +1,175 @@
 import { useEffect, useState } from "react";
 import "./style/core.css";
 import { usePeer } from "./PeerContext";
-import { fromStringKey } from "./crypto.ts";
+import { Image, Video, mapExtention, isViewable } from "./images";
+import type { Viewable,  } from "./images";
+import type { Post, PostItems } from "./data";
+import { MessageType, ViewableType, RenderContent } from "./data";
 
 export default function AppFrontendCore() {
-    const [count, setCount] = useState(0);
+    const [message, setMessage] = useState("");
+    const [file, setFile] = useState<File | null>(null);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [uploadStatus, setUploadStatus] = useState("");
 
     const { peer } = usePeer();
+    const [posts, setPosts] = useState<Post[]>([]);
+
+    // Handle file selection + local preview
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const selectedFile = e.target.files?.[0];
+        setFile(selectedFile || null);
+
+        if (selectedFile) {
+            const url = URL.createObjectURL(selectedFile);
+            setPreviewUrl(url);
+        } else {
+            setPreviewUrl(null);
+        }
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!peer || !peer.connected()) {
+            alert("Peer not initialized yet!");
+            return;
+        }
+
+        const content: PostItems[] = [];
+
+        // Add text message if present
+        if (message.trim() !== "") {
+            content.push({ attributes: [], content: message });
+        }
+
+        // Handle media (image or video)
+        if (file) {
+            try {
+                setUploadStatus("Uploading media...");
+                const mimeType = file.type;
+                const ext = mimeType.split("/")[1];
+                const viewType = mapExtention(ext);
+
+                if (!viewType) {
+                    throw new Error(`Unsupported file type: ${mimeType}`);
+                }
+
+                const arrayBuffer = await file.arrayBuffer();
+                const data = new Uint8Array(arrayBuffer);
+
+                let viewable: Viewable;
+                if (mimeType.startsWith("image/")) {
+                    viewable = new Image(viewType, file.name, "Uploaded via Distributed Post");
+                } else if (mimeType.startsWith("video/")) {
+                    viewable = new Video(viewType, file.name, "Uploaded via Distributed Post");
+                } else {
+                    throw new Error("Unsupported media type");
+                }
+
+                await viewable.save(data);
+                content.push(viewable);
+
+                setUploadStatus("✅ Upload successful!");
+            } catch (err) {
+                console.error("Upload failed:", err);
+                setUploadStatus("❌ Upload failed");
+                return;
+            }
+        }
+
+        // Construct and send post
+        const post: Post = {
+            author: peer.getName(),
+            type: MessageType.POST,
+            content,
+            timestamp: Date.now()
+        };
+
+        peer.sendData(post);
+
+        // Reset state
+        setMessage("");
+        setFile(null);
+        setPreviewUrl(null);
+        setUploadStatus("");
+    };
+
+
+    // Load recent posts
+    useEffect(() => {
+        if (!peer || !peer.connected()) return;
+        let cancelled = false;
+
+        (async () => {
+            const posts = await peer.getRecentPosts();
+            if (!cancelled) setPosts(posts);
+        })();
+
+        return () => { cancelled = true; };
+    }, [peer]);
 
     return (
-        <>
-            <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-gray-800">
+        <div style={{ padding: "2rem", fontFamily: "sans-serif" }}>
+            <h1>📝 Make Post</h1>
+            <form onSubmit={handleSubmit} style={{ marginBottom: "2rem" }}>
+                <input
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    placeholder="Write a message..."
+                    style={{ marginRight: "0.5rem" }}
+                />
+                <input
+                    type="file"
+                    accept="image/*,video/*"
+                    onChange={handleFileChange}
+                    style={{ marginRight: "0.5rem" }}
+                />
+                <button type="submit">Post</button>
+            </form>
 
-            <main className="flex flex-col items-center gap-4 mt-10">
-                <h1 className="text-4xl font-bold">Hello, React + TypeScript 👋</h1>
+            {previewUrl && (
+                <div style={{ marginBottom: "1rem" }}>
+                    <h3>Preview:</h3>
+                    <img
+                        src={previewUrl}
+                        alt="Preview"
+                        style={{ maxWidth: "300px", borderRadius: "10px" }}
+                    />
+                </div>
+            )}
+            {uploadStatus && <p>{uploadStatus}</p>}
 
-                <p className="text-lg">
-                This is your <strong>App.tsx</strong> — the root of your UI.
-                </p>
-
-                <button
-                onClick={() => {setCount(count + 1); peer?.sendDataDebug(fromStringKey(` Button clicked ${count + 1} times`)); }}
-                className="px-4 py-2 bg-blue-600 text-white rounded-xl shadow hover:bg-blue-700 transition"
-                >
-                You clicked {count} times
-                </button>
-            </main>
-
+            <h1>📜 Recent Posts</h1>
+            <div>
+                {posts.map((post, i) => (
+                    <div key={i} style={{ marginBottom: "1rem" }}>
+                        <h2>{post.author}</h2>
+                        {post.content.map((item, j) => {
+                            if (isViewable(item)) {
+                                if (item.type.startsWith("video")) {
+                                    return (
+                                        <video key={j} controls width="400">
+                                            <source src={item.url!} type={item.type} />
+                                        </video>
+                                    );
+                                } else {
+                                    return (
+                                        <img
+                                            key={j}
+                                            src={item.url!}
+                                            alt={item.title ?? "image"}
+                                            width="400"
+                                        />
+                                    );
+                                }
+                            } else {
+                                // Text message
+                                return <p key={j}>{item.content}</p>;
+                            }
+                        })}
+                    </div>
+                ))}
             </div>
-        </>
-    );
+        </div>
+        );      
 }

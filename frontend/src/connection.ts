@@ -1,4 +1,4 @@
-import { RELAY_SERVERS } from "./constant.ts";
+import { RELAY_SERVERS } from "./constants.ts";
 
 
 async function runWorker(id: string): Promise<{ id: string; result: number }> {
@@ -18,7 +18,7 @@ async function runWorker(id: string): Promise<{ id: string; result: number }> {
     });
 }
 
-export async function connect(closestServer: string | null = null): Promise<[WebSocket, string]> {
+export async function connect(closestServer: string | null = null, onmessage: ((event: MessageEvent) => void) | null = null): Promise<[WebSocket, string]> {
 
     let bestServer: string = closestServer || "";
 
@@ -50,6 +50,7 @@ export async function connect(closestServer: string | null = null): Promise<[Web
         ws.binaryType = "arraybuffer";
         ws.addEventListener("open", () => { resolve([ws, bestServer]); });
         ws.addEventListener("error", (err) => reject(err));
+        if (onmessage) ws.addEventListener("message", onmessage);
     });
 }
 

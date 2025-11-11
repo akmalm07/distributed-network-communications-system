@@ -1,4 +1,4 @@
-import { MessageType } from "../constant.ts";
+import { MessageType } from "../data.ts";
 import type { MessageEventType } from "../data.ts";
 import { getDataFormat } from "../data.ts";
 

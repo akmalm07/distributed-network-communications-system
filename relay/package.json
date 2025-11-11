@@ -3,12 +3,11 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-"scripts": {
-  "build": "tsc",
-  "start": "node dist/index.js",
-  "dev": "tsc && node dist/index.js"
-},
-
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -22,6 +21,7 @@
   "dependencies": {
     "@types/ws": "^8.18.1",
     "express": "^5.1.0",
+    "firebase-admin": "^13.5.0",
     "ws": "^8.18.3"
   }
 }
