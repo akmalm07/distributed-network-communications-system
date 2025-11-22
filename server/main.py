@@ -1,18 +1,17 @@
 
 # Must go FIRST — before importing google.cloud
 import os
-from flask import Flask, request, jsonify, send_from_directory, Blueprint;
+from flask import Flask
 from flask_cors import CORS
 import dotenv
-from google.cloud import storage
 
-from routes import viewable
+from routes import uploads
 
 dotenv.load_dotenv()
 
 app = Flask(__name__)
 
-app.register_blueprint(viewable.blueprint)
+app.register_blueprint(uploads.blueprint, url_prefix='/api')
 
 CORS(app, resources={r"*": {
     "origins": "*",

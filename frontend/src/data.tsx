@@ -12,7 +12,11 @@ export const enum MessageType {
     ACK = 0x03,
     POST = 0x04,
     POSTS = 0x05,
-    GET_POSTS = 0x06
+    GET_POSTS = 0x06,
+    CREATE_SUBCHAT = 0x07,
+
+    SUBCHAT_ERR = 0x10, // Subchat related errors. Make sure to now handle the data for the frontend
+    ERR = 0xFF
 }
 
 export enum ViewableType  {
@@ -23,6 +27,11 @@ export enum ViewableType  {
     JPG = "image/jpg",
     WEBP_VIDEO = "video/webp"
 }
+
+export enum AcknoladgementType { // This is to track the acknoladgement status of the requests
+    NEW_SUBCHAT = 0x01,
+    NEW_POST = 0x02
+} 
 
 export async function getDataFormat(data: Blob | ArrayBuffer): Promise<Uint8Array> {
     if (data instanceof Blob) {
@@ -59,6 +68,11 @@ export interface Post extends TransferDataType {
     author: string;
     timestamp: number;
 };
+
+export interface SubChat extends TransferDataType {
+    name: string;
+    simularSubchats: string[];
+}
 
 export interface PingPongMessage extends TransferDataType {
     type: MessageType.PING | MessageType.PONG;

@@ -2,7 +2,7 @@ import { connect, disconnect } from "./connection.ts";
 import { generateKeyPair, generateSigningKeyPair, generateRandomName, toStringKey, fromStringKey } from "./crypto.ts";
 import type { MessageEventType, DataFormat } from "./data";
 import { getDataFormat, encodeData, decodeData, MessageType, isArrayOfPosts } from "./data";
-
+import UniqueIDMap from "./unique";
 import type { TransferDataType, Post } from "./data";
 
 export class Peer {
@@ -19,13 +19,14 @@ export class Peer {
 
     private saveRecentPostsPromise: Promise<void> | null = null;
 
+    private requestMap: UniqueIDMap<TransferDataType> = new UniqueIDMap();
+
     constructor() {
         this.name = "Unnamed Peer";
         // this.privateKey = new Uint8Array();
         // this.publicKey = new Uint8Array();
         this.signingPrivateKey = new Uint8Array();
         this.signingPublicKey = new Uint8Array();
-
     }
 
     async initialize() : Promise<boolean> {
@@ -109,6 +110,7 @@ export class Peer {
     }*/
 
     public sendData(type: TransferDataType): void {
+        this.requestMap.set(type);
         if (this.connected()) {
             const data = encodeData(type);
             this.connection.send(data);
@@ -136,45 +138,59 @@ export class Peer {
     }
 
 
-private async onMessage(event: MessageEventType) {
-
-    console.log("Received message in Peer:", event, "type:", event.data instanceof ArrayBuffer);
-
-    let buffer = await getDataFormat(event.data);
-    const messageByte = buffer[0];
-    buffer = buffer.slice(1); 
-
-    switch (messageByte) {
-        case MessageType.PING: 
-            this.connection.send(Uint8Array.of(MessageType.PONG)); 
-            break;
-
-        case MessageType.PONG:
-            console.log("Received PONG");
-            break;
-
-        case MessageType.POST:
-            const decoded = decodeData(buffer, MessageType.POST);
-            console.log("Received POST data:", decoded);
-            break;
-
-        case MessageType.POSTS:
-            console.log("Received POSTS data");
-            this.saveRecentPostsPromise = (async () => {
-            const decoded = decodeData(buffer, MessageType.POSTS);
-                console.log("Decoded recent posts:", decoded);
-                if (isArrayOfPosts(decoded))
-                    sessionStorage.setItem("recentPosts", JSON.stringify(decoded));
-                
-            })();
-            break;
-
-        default:
-            console.log("Unknown message type received:", buffer);
+    private finalize(request: TransferDataType): void {
+        console.log("Finalizing request:", request);
+        // Additional logic for finalizing the request can be added here
     }
 
-    //await this.saveRecentPostsPromise;
-}
+    private async onMessage(event: MessageEventType) {
+
+        console.log("Received message in Peer:", event, "type:", event.data instanceof ArrayBuffer);
+
+        let buffer = await getDataFormat(event.data);
+        const messageByte = buffer[0];
+        buffer = buffer.slice(1); 
+
+        switch (messageByte) {
+            
+            case MessageType.PONG:
+                console.log("Received PONG");
+                break;
+                
+            case MessageType.POSTS:
+                console.log("Received POSTS data");
+                this.saveRecentPostsPromise = (async () => {
+                    const decoded = decodeData(buffer, MessageType.POSTS);
+                    console.log("Decoded recent posts:", decoded);
+                    if (isArrayOfPosts(decoded))
+                        sessionStorage.setItem("recentPosts", JSON.stringify(decoded));
+                })();
+                return;
+
+            case MessageType.ACK:
+                console.log("Received ACK from server");
+                const messageId = buffer.slice(1, 5); // bytes 1-4 are the request ID
+                const request = this.requestMap.get(messageId);
+                if (request)
+                    this.finalize(request);
+
+                this.requestMap.delete(messageId);
+                return;
+                    // Debugging purposes only
+
+                    /*case MessageType.POST:
+                    const decoded = decodeData(buffer, MessageType.POST);
+                    console.log("Received POST data:", decoded);
+                    break;*/
+                    /*case MessageType.PING: 
+                        this.connection.send(Uint8Array.of(MessageType.PONG)); 
+                        break;*/
+                    default:
+                        console.log("Unknown message type received:", buffer);
+        }
+
+        //await this.saveRecentPostsPromise;
+    }
 
     public async disconnect(): Promise<void> {
         if (this.connection) {

@@ -1,7 +1,8 @@
 import { WebSocketServer, WebSocket } from "ws";
-import { HOST, PORT, MessageType, prependByte } from "./constant.js";
+import Subchat from "./subchats.js";
+import { HOST, PORT, MessageType, prependByte, SubchatError } from "./constant.js";
 import type { ByteBuffer } from "./constant.js";
-import { db, timestamp } from "./db.js";
+import { db, timestamp, collectionExists } from "./db.js";
 
 export class Relay {
 
@@ -50,6 +51,18 @@ export class Relay {
         return this.cachedPosts;
     }
 
+    private async handleCreateSubchat(sender: WebSocket, postData: ByteBuffer, requestId: ByteBuffer) : Promise<void> {
+        const jsonData = JSON.parse(postData.toString());
+        const subchat = new Subchat(jsonData.embadding, jsonData.name); // The embadding is for AI intergration later
+        const error = await subchat.initalize(postData);
+        if (error !== SubchatError.NONE) {
+            sender.send(Buffer.from([MessageType.SUBCHAT_ERR, error]));
+            return;
+        }
+        
+        sender.send(Buffer.from([MessageType.ACK, ...requestId])); // Return a receipt for the creation so the user is aware
+    }
+
     private listenForConnections() {
         this.server.on("connection", async (ws: WebSocket) => {
             const posts = this.getCachedPosts();
@@ -83,10 +96,14 @@ export class Relay {
         return prependByte(Buffer.from(JSON.stringify(recentPosts.docs.map(doc => doc.data())), "utf-8"), MessageType.POSTS);
     }
 
-    private handleNewPost(sender: WebSocket, postData: ByteBuffer) {
+    private async handleNewPost(sender: WebSocket, postData: ByteBuffer, requestId: ByteBuffer) : Promise<SubchatError> {
 
         const jsonData = JSON.parse(postData.toString());
 
+        if (! await collectionExists(jsonData.subchat)) {
+            return SubchatError.NONE_EXISTANT_SUBCHAT;
+        }
+        
         db.collection("posts").add({
             content: jsonData.content,
             author: jsonData.author,
@@ -96,21 +113,34 @@ export class Relay {
         console.log("Handling new post:", jsonData);
         // Here you can add logic to store the post or process it further
         //this.broadcast(JSON.stringify(jsonData), sender);
+        
+        sender.send(Buffer.from([MessageType.ACK, ...requestId]));
+
+        return SubchatError.NONE;
     }
 
-    private onMessage(data: ByteBuffer, sender: WebSocket) {            
+    private async onMessage(data: ByteBuffer, sender: WebSocket) {            
+
+        const requestId = data.subarray(1, 5); // bytes 1-4
+        const requestData = data.subarray(5); 
 
         switch (data[0]) {
             case MessageType.PING:
                 sender.send(Buffer.from([MessageType.PONG]));
                 return;
             case MessageType.POST:
-                this.handleNewPost(sender, data.subarray(1));
+                const error = await this.handleNewPost(sender, requestData, requestId);
+                if (error !== SubchatError.NONE)
+                    sender.send(Buffer.from([MessageType.ERR, SubchatError.NONE_EXISTANT_SUBCHAT]));
                 return;
             case MessageType.GET_POSTS:
                 this.getCachedPosts().then((posts) => {
                     sender.send(posts);
                 });
+                return;
+            case MessageType.CREATE_SUBCHAT:
+                this.handleCreateSubchat(sender, requestData, requestId);
+                return;
             // Add more cases later, as needed
             default:
                 break;

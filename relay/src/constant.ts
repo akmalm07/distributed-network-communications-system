@@ -9,7 +9,17 @@ export const enum MessageType {
     ACK = 0x03,
     POST = 0x04,
     POSTS = 0x05,
-    GET_POSTS = 0x06
+    GET_POSTS = 0x06,
+    CREATE_SUBCHAT = 0x07,
+
+    SUBCHAT_ERR = 0x10, // Subchat related errors. Make sure to now handle the data for the frontend
+    ERR = 0xFF
+}
+
+export const enum SubchatError {
+    NONE = 0,
+    TOO_MANY_SIMILAR = 1,
+    NONE_EXISTANT_SUBCHAT = 2
 }
 
 // export const enum MessageRecipient {

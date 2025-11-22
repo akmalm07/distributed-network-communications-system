@@ -5,13 +5,13 @@ from video import get_video_duration, within_range, compress_video
 from flask import Blueprint, request, jsonify
 
 
-blueprint = Blueprint('api', __name__)
+blueprint = Blueprint('uploads', __name__)
 
 storage_client = storage.Client()
 bucket = storage_client.bucket(os.getenv("GCS_BUCKET_NAME"))
 
 
-@blueprint.route('/api/upload', methods=['POST'])
+@blueprint.route('/upload', methods=['POST'])
 def upload():
     try:
         
