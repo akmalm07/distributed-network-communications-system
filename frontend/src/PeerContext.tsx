@@ -5,10 +5,12 @@ import { Peer } from "./peer";
 
 type PeerContextType = {
     peer: Peer | null;
+    subchat: string | null;
 };
 
 const PeerContext = createContext<PeerContextType>({
     peer: null,
+    subchat: "root",
 });
 
 export const usePeer = () => useContext(PeerContext);
@@ -16,6 +18,7 @@ export const usePeer = () => useContext(PeerContext);
 
 export const PeerProvider = ({ children }: { children: ReactNode }) => {
     const peerRef = useRef<Peer | null>(null);
+    const [subchat, setSubchat] = useState<string | null>("root");
     const [connected, setConnected] = useState(false);
     const [loading, setLoading] = useState(true);
 
@@ -65,7 +68,7 @@ export const PeerProvider = ({ children }: { children: ReactNode }) => {
 
 
     return (
-        <PeerContext.Provider value={{ peer: peerRef.current! }}>
+        <PeerContext.Provider value={{ peer: peerRef.current!, subchat: subchat }}>
             {children}
         </PeerContext.Provider>
     );

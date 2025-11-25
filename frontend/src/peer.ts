@@ -1,7 +1,7 @@
 import { connect, disconnect } from "./connection.ts";
 import { generateKeyPair, generateSigningKeyPair, generateRandomName, toStringKey, fromStringKey } from "./crypto.ts";
 import type { MessageEventType, DataFormat } from "./data";
-import { getDataFormat, encodeData, decodeData, MessageType, isArrayOfPosts } from "./data";
+import { getDataFormat, encodeData, decodeData, MessageType, isArrayOfPosts, Status } from "./data";
 import UniqueIDMap from "./unique";
 import type { TransferDataType, Post } from "./data";
 
@@ -17,9 +17,11 @@ export class Peer {
 
     private name: string;
 
+    private favoriteSubchats: string[] = [];
+
     private saveRecentPostsPromise: Promise<void> | null = null;
 
-    private requestMap: UniqueIDMap<TransferDataType> = new UniqueIDMap();
+    private requestMap: UniqueIDMap<{ data: TransferDataType, status: Status }> = new UniqueIDMap();
 
     constructor() {
         this.name = "Unnamed Peer";
@@ -29,7 +31,7 @@ export class Peer {
         this.signingPublicKey = new Uint8Array();
     }
 
-    async initialize() : Promise<boolean> {
+    async initialize(subchat: string) : Promise<boolean> {
         
         if (localStorage.getItem("signingPublicKey") && localStorage.getItem("signingPrivateKey") && localStorage.getItem("peerName")) {
             
@@ -42,6 +44,8 @@ export class Peer {
             this.name = localStorage.getItem("peerName")!;
             console.log("Peer name:", this.name);
             
+            if (localStorage.getItem("favoriteSubchats"))
+                this.favoriteSubchats = JSON.parse(localStorage.getItem("favoriteSubchats")!) as string[];
         } else {
         console.log("Initializing new peer...");
 
@@ -80,6 +84,14 @@ export class Peer {
             console.error("Failed to connect:", error);
             return false;
         }
+
+        this.connection.send(Uint8Array.of(MessageType.HANDSHAKE, ...this.signingPublicKey, ...new TextEncoder().encode(subchat)));
+        
+        if (!this.favoriteSubchats.includes(subchat) && subchat !== "root") {
+            this.favoriteSubchats.push(subchat);
+            localStorage.setItem("favoriteSubchats", JSON.stringify(this.favoriteSubchats));
+        }
+
         return true;
     }
 
@@ -88,6 +100,18 @@ export class Peer {
             const data = await getDataFormat(event.data);
             callback(data);
         }
+    }
+
+    public addFavoriteSubchat(subchatId: string): void {
+        if (!this.favoriteSubchats.includes(subchatId)) {
+            this.favoriteSubchats.push(subchatId);
+            localStorage.setItem("favoriteSubchats", JSON.stringify(this.favoriteSubchats));
+        }
+    }
+
+    public removeFavoriteSubchat(subchatId: string): void {
+        this.favoriteSubchats = this.favoriteSubchats.filter(id => id !== subchatId);
+        localStorage.setItem("favoriteSubchats", JSON.stringify(this.favoriteSubchats));
     }
 
     public connected(): boolean {
@@ -102,19 +126,14 @@ export class Peer {
         return this.signingPublicKey;
     }
 
-    /* public sendDataBufferRaw(data: Uint8Array): void {
+    public sendData(type: TransferDataType): number | undefined {
         if (this.connected()) {
-            console.log("Sending data from Peer:", new TextDecoder().decode(data));
+            const requestId = this.requestMap.set({ data: type, status: Status.PENDING }) as number;
+            const data = encodeData(type, this.getDigitArray(requestId));
             this.connection.send(data);
+            return requestId;
         }
-    }*/
-
-    public sendData(type: TransferDataType): void {
-        this.requestMap.set(type);
-        if (this.connected()) {
-            const data = encodeData(type);
-            this.connection.send(data);
-        }
+        throw new Error("Not connected to relay server"); // Debugging purposes only
     }
 
     public async getRecentPosts(): Promise<Post[]> {
@@ -137,11 +156,59 @@ export class Peer {
         return recentPosts ? JSON.parse(recentPosts) : [];
     }
 
-
-    private finalize(request: TransferDataType): void {
-        console.log("Finalizing request:", request);
-        // Additional logic for finalizing the request can be added here
+    private getDigitArray(id: number): Uint8Array {
+        const digits = [];
+        while (id >= 10) {
+            digits.push(id % 10);
+            id = (id / 10) | 0; // fast floor
+        }
+        digits.push(id);
+        digits.reverse();
+        return new Uint8Array(digits);
     }
+
+    private finalize(id: Uint8Array): void {
+        let idNum = 0;
+        for (let i = 0; i < id.length; i++)
+            idNum = (idNum << 8) | id[i];
+        const req = this.requestMap.get(idNum);
+        if (!req) return;
+
+        this.requestMap.change(idNum, {
+            data: req.data,
+            status: Status.COMPLETED
+        });
+
+    }
+
+    public async getStatus(id: number): Promise<Status> {
+        const req = this.requestMap.get(id);
+        if (!req) return Status.NON_EXISTENT;
+
+        if (req.status === Status.PENDING) {
+            return new Promise<Status>((resolve) => {
+                const interval = setInterval(() => {
+                    const updated = this.requestMap.get(id);
+
+                    if (!updated) {
+                        clearInterval(interval);
+                        resolve(Status.NON_EXISTENT);
+                        return;
+                    }
+
+                    if (updated.status !== Status.PENDING) {
+                        clearInterval(interval);
+                        this.requestMap.delete(id);
+                        resolve(updated.status);
+                    }
+                }, 100);
+            });
+        }
+
+        this.requestMap.delete(id);
+        return req.status;
+    }
+
 
     private async onMessage(event: MessageEventType) {
 
@@ -170,12 +237,11 @@ export class Peer {
             case MessageType.ACK:
                 console.log("Received ACK from server");
                 const messageId = buffer.slice(1, 5); // bytes 1-4 are the request ID
-                const request = this.requestMap.get(messageId);
-                if (request)
-                    this.finalize(request);
-
-                this.requestMap.delete(messageId);
-                return;
+                const request = this.requestMap.get(messageId); // Possibly early delete of the messageId
+                if (request) {
+                    this.finalize(messageId);
+                }
+                    return;
                     // Debugging purposes only
 
                     /*case MessageType.POST:
@@ -186,7 +252,8 @@ export class Peer {
                         this.connection.send(Uint8Array.of(MessageType.PONG)); 
                         break;*/
                     default:
-                        console.log("Unknown message type received:", buffer);
+                        console.log("Unknown message type received:", new TextDecoder().decode(buffer));
+                        
         }
 
         //await this.saveRecentPostsPromise;
@@ -198,4 +265,11 @@ export class Peer {
             console.log("Disconnected from relay server");
         }
     }
+
+    /* public sendDataBufferRaw(data: Uint8Array): void {
+    if (this.connected()) {
+        console.log("Sending data from Peer:", new TextDecoder().decode(data));
+        this.connection.send(data);
+    }
+    }*/
 }

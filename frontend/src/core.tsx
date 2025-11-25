@@ -4,7 +4,9 @@ import { usePeer } from "./PeerContext";
 import { Image, Video, mapExtention, isViewable } from "./images";
 import type { Viewable,  } from "./images";
 import type { Post, PostItems } from "./data";
-import { MessageType, ViewableType, RenderContent } from "./data";
+import { MessageType, ViewableType, RenderContent, Status } from "./data";
+import { th } from "@faker-js/faker";
+
 
 export default function AppFrontendCore() {
     const [message, setMessage] = useState("");
@@ -12,9 +14,15 @@ export default function AppFrontendCore() {
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [uploadStatus, setUploadStatus] = useState("");
 
-    const { peer } = usePeer();
+    const { peer, subchat } = usePeer();
     const [posts, setPosts] = useState<Post[]>([]);
 
+    /** TEST */
+    useEffect(() => { // TESTING PURPOSES ONLY
+        window.peer = peer;
+    }, [peer]);
+    /** TEST */
+    
     // Handle file selection + local preview
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFile = e.target.files?.[0];
@@ -77,21 +85,42 @@ export default function AppFrontendCore() {
             }
         }
 
+        if (subchat === null) 
+            throw new Error("No subchat selected, Do you want to post to 'root' subchat?");
+
         // Construct and send post
         const post: Post = {
             author: peer.getName(),
             type: MessageType.POST,
+            subchat: subchat,
             content,
             timestamp: Date.now()
         };
 
-        peer.sendData(post);
+        const id = peer.sendData(post);
+        const status = await peer.getStatus(id!);
+
+        if (!status) {
+            setUploadStatus("Failed to send post.");
+            return;
+        } else {
+            setUploadStatus("WOW!!");
+            console.log("Post send status YAY!!! :", Status[status]);
+        }
 
         // Reset state
         setMessage("");
         setFile(null);
         setPreviewUrl(null);
         setUploadStatus("");
+
+        if (await status === Status.COMPLETED) {
+            setUploadStatus("Post sent successfully!");
+            // Update local posts immediately
+            setPosts((prevPosts) => [post, ...prevPosts]);
+        } else {
+            setUploadStatus("Failed to send post.");
+        }
     };
 
 

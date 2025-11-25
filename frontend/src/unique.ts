@@ -22,6 +22,20 @@ export default class UniqueIDMap<T> {
         return id;
     }
 
+    public change(id: number | Uint8Array, item: T): boolean {
+        if (id instanceof Uint8Array) {
+            let numId = 0;
+            for (let i = 0; i < id.length; i++)
+                numId = (numId << 8) | id[i];
+            this.items.set(numId, item);
+            return true;
+        }
+        if (!this.used.has(id)) return false;
+
+        this.items.set(id, item);
+        return true;
+    }
+
     public get(id: number | Uint8Array): T | undefined {
         if (id instanceof Uint8Array) {
             let numId = 0;

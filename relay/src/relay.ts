@@ -2,15 +2,24 @@ import { WebSocketServer, WebSocket } from "ws";
 import Subchat from "./subchats.js";
 import { HOST, PORT, MessageType, prependByte, SubchatError } from "./constant.js";
 import type { ByteBuffer } from "./constant.js";
-import { db, timestamp, collectionExists } from "./db.js";
+import { db, timestamp, documentExists } from "./db.js";
+
+interface ClientSocket extends WebSocket {
+    signingPublicKey?: Uint8Array;
+}
+
+interface PostData {
+    subchat: string;
+    content: any;
+}
 
 export class Relay {
 
-    private connections: Set<WebSocket>;
+    private connections: Set<ClientSocket>;
 
     private server: WebSocketServer;
 
-    private cachedPosts: any = null;
+    private cachedPosts: PostData[] = [];
     private lastCacheTime = 0;
     private cacheTTL = 5000; // 5 seconds
 
@@ -39,12 +48,12 @@ export class Relay {
         this.listenForConnections();
     }
 
-    private async getCachedPosts() { // Tested Cache, works!
+    private async getCachedPosts(subchat: string) { // Tested Cache, works!
         const now = Date.now();
 
         if (!this.cachedPosts || (now - this.lastCacheTime > this.cacheTTL)) {
             console.log("Refreshing cached posts... (WAS NOT CACHED OR EXPIRED)");
-            this.cachedPosts = await this.mostRecentPosts();
+            this.cachedPosts = await this.mostRecentPosts(subchat);
             this.lastCacheTime = now;
         }
 
@@ -64,8 +73,8 @@ export class Relay {
     }
 
     private listenForConnections() {
-        this.server.on("connection", async (ws: WebSocket) => {
-            const posts = this.getCachedPosts();
+        this.server.on("connection", async (ws: ClientSocket) => {
+            const posts = this.getCachedPosts("root"); // Default to root subchat for now
             
             this.connections.add(ws);
 
@@ -84,38 +93,57 @@ export class Relay {
     }
 
 
-    private async mostRecentPosts(): Promise<ByteBuffer> {
+    private async mostRecentPosts(subchat: string): Promise<ByteBuffer> {
+        
+        let realSubchat = "root";
+        if (subchat !== "root")
+            realSubchat = `root-<${subchat}>`;
         
         const recentPosts = await db.collection("posts")
+            .doc(realSubchat)
+            .collection("posts")
             .orderBy("timestamp", "desc")
             .limit(10)
             .get();
-
+        
         console.log(`Fetched ${recentPosts.size} recent posts from database.`, recentPosts.docs.map(doc => doc.data()));
 
         return prependByte(Buffer.from(JSON.stringify(recentPosts.docs.map(doc => doc.data())), "utf-8"), MessageType.POSTS);
     }
 
-    private async handleNewPost(sender: WebSocket, postData: ByteBuffer, requestId: ByteBuffer) : Promise<SubchatError> {
+    private async handleNewPost(postData: ByteBuffer) : Promise<SubchatError> {
+
+        /** Notation for subchats will be:
+            `root-<${jsonData.subchat}>`
+            root-<subchat_name>
+        */
 
         const jsonData = JSON.parse(postData.toString());
 
-        if (! await collectionExists(jsonData.subchat)) {
+        let subchatName : string = "root";
+        if (jsonData.subchat !== "root") {
+            console.log("Non-root subchat post detected.");
+            subchatName = `root-<${jsonData.subchat}>`;
+        }
+
+        if (!await documentExists(`posts/${subchatName}`)) {
+            console.log("Subchat does not exist:", subchatName);
             return SubchatError.NONE_EXISTANT_SUBCHAT;
         }
+
         
-        db.collection("posts").add({
+        await db.collection("posts")
+        .doc(subchatName)
+        .collection("posts").add({
             content: jsonData.content,
             author: jsonData.author,
             timestamp: timestamp.now()
         });
-
         console.log("Handling new post:", jsonData);
+        
         // Here you can add logic to store the post or process it further
         //this.broadcast(JSON.stringify(jsonData), sender);
-        
-        sender.send(Buffer.from([MessageType.ACK, ...requestId]));
-
+    
         return SubchatError.NONE;
     }
 
@@ -124,23 +152,53 @@ export class Relay {
         const requestId = data.subarray(1, 5); // bytes 1-4
         const requestData = data.subarray(5); 
 
+        console.log("Received message of type:", data[0]);
+        console.log("Request ID:", requestId);
+        console.log("Request Data:", new TextDecoder().decode(requestData));
+
         switch (data[0]) {
             case MessageType.PING:
                 sender.send(Buffer.from([MessageType.PONG]));
                 return;
             case MessageType.POST:
-                const error = await this.handleNewPost(sender, requestData, requestId);
-                if (error !== SubchatError.NONE)
+                console.log("Handling new post...");
+                const error = await this.handleNewPost(requestData);
+                if (error !== SubchatError.NONE) {
+                    console.log("Error handling new post:", error);
                     sender.send(Buffer.from([MessageType.ERR, SubchatError.NONE_EXISTANT_SUBCHAT]));
+                    return;
+                }
+                sender.send(Buffer.from([MessageType.ACK, ...requestId]));
                 return;
             case MessageType.GET_POSTS:
-                this.getCachedPosts().then((posts) => {
+                
+                this.getCachedPosts(requestData.toString()).then((posts) => {
                     sender.send(posts);
                 });
                 return;
             case MessageType.CREATE_SUBCHAT:
                 this.handleCreateSubchat(sender, requestData, requestId);
                 return;
+            case MessageType.HANDSHAKE: 
+                console.log("Handling HANDSHAKE...");
+
+                // requestData contains: [publicKey..., subchatString...]
+                const publicKey = requestData.subarray(0, 32); // CHANGE if your key is a different length
+                const subchatBytes = requestData.subarray(32);
+
+                const subchat = new TextDecoder().decode(subchatBytes);
+
+                // Store metadata on this client connection
+                (sender as ClientSocket).signingPublicKey = publicKey;
+
+                console.log("Client public key:", publicKey);
+                console.log("Client selected subchat:", subchat);
+
+                // Send back ACK + requestId
+                sender.send(Buffer.from([MessageType.ACK, ...requestId]));
+
+                return;
+
             // Add more cases later, as needed
             default:
                 break;

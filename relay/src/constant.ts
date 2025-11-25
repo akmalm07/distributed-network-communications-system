@@ -11,6 +11,7 @@ export const enum MessageType {
     POSTS = 0x05,
     GET_POSTS = 0x06,
     CREATE_SUBCHAT = 0x07,
+    HANDSHAKE = 0x08,
 
     SUBCHAT_ERR = 0x10, // Subchat related errors. Make sure to now handle the data for the frontend
     ERR = 0xFF

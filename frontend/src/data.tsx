@@ -14,9 +14,17 @@ export const enum MessageType {
     POSTS = 0x05,
     GET_POSTS = 0x06,
     CREATE_SUBCHAT = 0x07,
+    HANDSHAKE = 0x08,
 
     SUBCHAT_ERR = 0x10, // Subchat related errors. Make sure to now handle the data for the frontend
     ERR = 0xFF
+}
+
+export enum Status {
+    PENDING = 0,
+    COMPLETED = 1,
+    FAILED = 2,
+    NON_EXISTENT = 3
 }
 
 export enum ViewableType  {
@@ -64,6 +72,7 @@ export interface TransferDataType {
 
 export interface Post extends TransferDataType {
     type: MessageType.POST;
+    subchat: string;
     content: PostItems[];
     author: string;
     timestamp: number;
@@ -79,17 +88,22 @@ export interface PingPongMessage extends TransferDataType {
 };
 
 
-export function encodeData(data: TransferDataType): Uint8Array {
+export function encodeData(data: TransferDataType, requestId: Uint8Array | undefined): Uint8Array {
     switch (data.type) {
         case MessageType.PING:
         case MessageType.PONG:
-            return Uint8Array.of(data.type);
+            return Uint8Array.of(data.type); // Should only be one byte or require requestId?
         case MessageType.POST:
             const type = data.type;
             delete (data as any).type;
             const jsonString = JSON.stringify(data);
+            data.type = type; // Restore type
+
             const encoded = new TextEncoder().encode(jsonString);
-            return Uint8Array.of(type, ...encoded);
+            if (requestId instanceof Uint8Array) 
+                return Uint8Array.of(type, ...requestId, ...encoded);
+            else 
+                return Uint8Array.of(type, ...encoded);
         default:
             throw new Error("Unsupported data type for encoding");
     }
